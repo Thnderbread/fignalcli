@@ -2,3 +2,4 @@ fignal
 notes
 .env
 example.json
+__pycache__
