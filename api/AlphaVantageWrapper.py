@@ -83,7 +83,7 @@ class AlphaVantageApiWrapper:
         trimmed_data = {}
 
         target_idx = self.find_target_index(
-            cutoff_date, price_data_dates, 0, len(price_data_dates) - 1
+            cutoff_date_string, price_data_dates, 0, len(price_data_dates) - 1
         )
 
         # if target_idx is not found, it indicates the data set
