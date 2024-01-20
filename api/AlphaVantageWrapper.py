@@ -8,6 +8,7 @@ class AlphaVantageApiWrapper:
     def __init__(self, api_key) -> None:
         self.base_url = "https://www.alphavantage.co"
         self.api_key = api_key
+        self.date_format = "%Y-%m-%d"
 
     def make_fx_daily_request(self, from_currency: str, to_currency: str) -> dict:
         """Contacts the Alpha Vantage api for the daily time series for the given FX currency pair.
@@ -49,10 +50,10 @@ class AlphaVantageApiWrapper:
 
         return data
 
-    # TODO: It's possible that the day that matches the cutoff delta is skipped in the raw dataset, meaning the entire price_data dict would be returned
-    def trim_price_data(
-        self, price_data: dict, cutoff_delta=6
-    ) -> dict[datetime, dict[str, str]]:
+    # TODO: It's possible that the day that matches the cutoff delta
+    # TODO is skipped in the raw dataset, meaning the entire price_data dict would be returned
+    def trim_price_data(self, price_data: dict, cutoff_delta=6) -> dict:
+        # dict[datetime, dict[str, str]]
         """Trims the given price data to only include data up to six months in the past.
 
         Args:
@@ -63,27 +64,37 @@ class AlphaVantageApiWrapper:
             dict: The trimmed price data, if possible - otherwise the given dict.
         """
         # Only need to go 6 months back for the price data
-        cutoff_date = datetime.now() - relativedelta(months=cutoff_delta)
 
-        # print(stuff["Time Series FX (Daily)"]["2004-12-20"]) - yields actual data
+        # Remove metadata
+        raw_price_data = price_data["Time Series FX (Daily)"]
+        price_data_dates = list(raw_price_data.keys())
+
+        # Figure out the cutoff date - six months before earliest data point
+        earliest_date = price_data_dates[0]
+        cutoff_date = self.__get_date_from_string(earliest_date) - relativedelta(
+            months=cutoff_delta
+        )
+
+        # Reconvert to str for search function -
+        # Also strip the time portion with .date()
+        cutoff_date_string = str(cutoff_date.date())
+
+        # ! Remove this - print(stuff["Time Series FX (Daily)"]["2004-12-20"]) - yields actual data
         trimmed_data = {}
-        price_data_dates = list(price_data["Time Series FX (Daily)"].keys())
 
         target_idx = self.find_target_index(
             cutoff_date, price_data_dates, 0, len(price_data_dates) - 1
         )
 
-        # if target_idx is none, it indicates the data set
+        # if target_idx is not found, it indicates the data set
         # does not have up to 6 months of data.
         if target_idx > -1:
-            for idx, (key, value) in enumerate(
-                price_data["Time Series FX (Daily)"].items()
-            ):
+            for idx, (key, value) in enumerate(raw_price_data.items()):
                 trimmed_data[key] = value
                 # need one past the target index for the RSI calculation
                 if idx - 1 == target_idx:
                     return trimmed_data
-        return price_data["Time Series FX (Daily)"]
+        return raw_price_data
 
     def find_target_index(
         self, key: datetime, keys: list[datetime], low: int, high: int
@@ -106,19 +117,23 @@ class AlphaVantageApiWrapper:
             raise ValueError("Missing key.")
 
         if low > high:
-            print(
-                f"key type: {type(key)} | key.date: {key.date()} | key: {key} | current keys: {list(map(lambda n: n.date(), keys))}"
-            )
             return -1
 
         mid = low + ((high - low) // 2)
-        midpoint_date = keys[mid]
+        midpoint_date_str = keys[mid]
 
-        if midpoint_date.date() == key.date():
+        # Get the datetime values for accurate date comparisons
+        key_date = self.__get_date_from_string(key)
+        midpoint_date = self.__get_date_from_string(midpoint_date_str)
+
+        # Flip the common binary search logic to account for
+        # the fact that the keys list is given in reverse -
+        # latest dates (larger) are at the start of the list.
+        if key_date == midpoint_date:
             return mid
-        elif key.date() < midpoint_date.date():
+        elif key_date > midpoint_date:
             return self.find_target_index(key, keys, low, high=mid - 1)
-        elif key.date() > midpoint_date.date():
+        elif key_date < midpoint_date:
             return self.find_target_index(key, keys, low=mid + 1, high=high)
 
     def validate_currency_codes(self, codes: list[str]) -> bool:
@@ -128,3 +143,14 @@ class AlphaVantageApiWrapper:
             bool: True if all codes are valid, false otherwise.
         """
         return all(isinstance(code, str) and len(code) == 3 for code in codes)
+
+    def __get_date_from_string(self, date_string: str) -> datetime:
+        """Converts the given string into a date object for comparison.
+
+        Args:
+            date_string (str): The string to be converted.
+
+        Returns:
+            datetime: Datetime object for comparison.
+        """
+        return datetime.strptime(date_string, self.date_format)
